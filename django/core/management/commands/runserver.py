@@ -33,6 +33,8 @@ class Command(BaseCommand):
             help='Tells Django to NOT use threading.'),
         make_option('--noreload', action='store_false', dest='use_reloader', default=True,
             help='Tells Django to NOT use the auto-reloader.'),
+        make_option('--gunicorn', action='store_true', dest='use_gunicorn', default=False,
+            help='Tells Django to use Gunicorn as a development server.'),
     )
     help = "Starts a lightweight Web server for development."
     args = '[optional port number, or ipaddr:port]'
@@ -86,11 +88,59 @@ class Command(BaseCommand):
         Runs the server, using the autoreloader if needed
         """
         use_reloader = options.get('use_reloader')
+        use_gunicorn = options.get('use_gunicorn')
 
-        if use_reloader:
+        if use_reloader and not use_gunicorn:
             autoreload.main(self.inner_run, args, options)
+        elif use_gunicorn:
+            self.gunicorn_run(*args, **options)
         else:
             self.inner_run(*args, **options)
+
+    def gunicorn_run(self, *args, **options):
+        try:
+            import gunicorn
+        except ImportError:
+            raise ImproperlyConfigured('You need to install "gunicorn" first.')
+
+        from django.conf import settings
+        from django.core.wsgi import DjangoApplication
+
+        use_reloader = options.get('use_reloader', True)
+        shutdown_message = options.get('shutdown_message', '')
+        quit_command = 'CTRL-BREAK' if sys.platform == 'win32' else 'CONTROL-C'
+
+        now = datetime.now().strftime('%B %d, %Y - %X')
+        if six.PY2:
+            now = now.decode('utf-8')
+        self.stdout.write((
+            "%(started_at)s\n"
+            "Django version %(version)s, using settings %(settings)r\n"
+            "Starting development server using Gunicorn %(gunicorn_version)s at http://%(addr)s:%(port)s/\n"
+            "Quit the server with %(quit_command)s.\n"
+        ) % {
+            "started_at": now,
+            "version": self.get_version(),
+            "settings": settings.SETTINGS_MODULE,
+            "addr": '[%s]' % self.addr if self._raw_ipv6 else self.addr,
+            "port": self.port,
+            "quit_command": quit_command,
+            "gunicorn_version": gunicorn.__version__,
+        })
+
+        gunicorn_config = {
+            'bind': '%s:%i' % (self.addr, int(self.port)),
+            'debug': True,
+            'reload': use_reloader,
+            'worker_class': 'sync',
+        }
+        wsgiapp = DjangoApplication(gunicorn_config)
+        try:
+            wsgiapp.run()
+        except KeyboardInterrupt:
+            if shutdown_message:
+                self.stdout.write(shutdown_message)
+            sys.exit(0)
 
     def inner_run(self, *args, **options):
         from django.conf import settings
