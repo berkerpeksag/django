@@ -120,6 +120,10 @@ class FileTests(unittest.TestCase):
         f = File(StringIO('one\ntwo\nthree'))
         self.assertEqual(list(f), ['one\n', 'two\n', 'three'])
 
+    def test_file_repr(self):
+        f = File(None, 'djángö')
+        self.assertEqual(repr(f), b'<File: dj\xc3\xa1ng\xc3\xb6>')
+
 
 class NoNameFileTestCase(unittest.TestCase):
     """
